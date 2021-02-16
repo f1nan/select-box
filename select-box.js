@@ -71,7 +71,13 @@ export class SelectBox extends HTMLElement {
         super();
         this.attachShadow({ mode: "open" });
         this.shadowRoot.appendChild(template.content.cloneNode(true));
+
+        // Wait with initialization until the custom element select box option is defined. Otherwise
+        // properties of select box option elements are undefined.
         whenSelectBoxOptionsDefined(this).then(initialize);
+
+        this._searchTerm = "";
+        this._debounceTimeout = null;
     }
 
     get options() {
@@ -80,6 +86,10 @@ export class SelectBox extends HTMLElement {
 
     get selectedOption() {
         return this.options.find((o) => o.selected);
+    }
+
+    get selectedOptionIndex() {
+        return this.options.indexOf(this.selectedOption);
     }
 
     selectValue(value) {
@@ -92,37 +102,80 @@ export class SelectBox extends HTMLElement {
         if (prevSelectedOption) {
             prevSelectedOption.selected = false;
         }
-
         newSelectedOption.selected = true;
+        newSelectedOption.scrollIntoView({ block: "nearest" });
 
         const label = this.shadowRoot.querySelector("span");
         label.innerText = newSelectedOption.innerText;
     }
 
     connectedCallback() {
-        this.addEventListener("click", this._handleClick);
+        // The selection of on option has to occur before the blur of the select box. The
+        // mousedown event fires before the blur event. That is why it is used over click here.
+        this.addEventListener("mousedown", this._handleMousedown);
         this.addEventListener("blur", this._handleBlur);
+        this.addEventListener("keydown", this._handleKeydown);
     }
 
     disconnectedCallback() {
-        this.removeEventListener("click", this._handleClick);
+        this.removeEventListener("mousedown", this._handleMousedown);
         this.removeEventListener("blur", this._handleBlur);
+        this.removeEventListener("keydown", this._handleKeydown);
     }
 
-    _handleClick = (e) => {
+    _handleMousedown = (e) => {
         if (e.target.tagName === "SELECT-BOX-OPTION") {
             this.selectValue(e.target.value);
         }
 
-        optionsList(this).toggleVisibility();
+        optionsContainer(this).toggleVisibility();
     };
 
     _handleBlur = (e) => {
-        optionsList(this).hide();
+        optionsContainer(this).hide();
+    };
+
+    _handleKeydown = (e) => {
+        switch (e.code) {
+            case "Space":
+                optionsContainer(this).toggleVisibility();
+                break;
+            case "ArrowUp":
+                const previousOption = this.options[
+                    this.selectedOptionIndex - 1
+                ];
+                if (previousOption) {
+                    this.selectValue(previousOption.value);
+                }
+
+                break;
+            case "ArrowDown":
+                const nextOption = this.options[this.selectedOptionIndex + 1];
+                if (nextOption) {
+                    this.selectValue(nextOption.value);
+                }
+
+                break;
+            case "Enter":
+            case "Escape":
+                optionsContainer(this).hide();
+                break;
+            default:
+                clearTimeout(this._debounceTimeout);
+                this._searchTerm += e.key;
+                this._timeoutHandle = setTimeout(() => {
+                    this._searchTerm = "";
+                }, 500);
+                
+                const searchedOption = this.options.find(o => o.value.toLowerCase().startsWith(this._searchTerm));
+                if (searchedOption) {
+                    this.selectValue(searchedOption.value);
+                }
+        }
     };
 }
 
-function optionsList(selectBox) {
+function optionsContainer(selectBox) {
     const ul = selectBox.shadowRoot.querySelector("ul");
     return {
         toggleVisibility() {
