@@ -18,7 +18,8 @@ template.innerHTML = `
             display: inline-block;
         }
 
-        div:focus > span {
+        div:focus > span,
+        div.open > span {
             border-width: 2px;
         }
 
@@ -47,6 +48,7 @@ template.innerHTML = `
             position: absolute;
             padding: 0;
             margin: 0;
+            outline: none;
             border: 2px solid black;
             border-top: none;
             width: 100%;
@@ -54,11 +56,11 @@ template.innerHTML = `
             overflow-y: auto;
         }
         
-        ul.show {
+        div.open > ul {
             display: block;
         }
     </style>
-    <div tabindex="0">
+    <div>
         <span></span>
         <ul>
             <slot></slot>
@@ -75,6 +77,8 @@ export class SelectBox extends HTMLElement {
         // Wait with initialization until the custom element select box option is defined. Otherwise
         // properties of select box option elements are undefined.
         whenSelectBoxOptionsDefined(this).then(initialize);
+
+        console.log(this.getAttribute("tabindex"));
 
         this._searchTerm = "";
         this._debounceTimeout = null;
@@ -110,27 +114,43 @@ export class SelectBox extends HTMLElement {
     }
 
     connectedCallback() {
+        this.addEventListener("focus", this._handleFocus);
+        this.addEventListener("blur", this._handleBlur);
         this.addEventListener("click", this._handleClick);
         this.addEventListener("keydown", this._handleKeydown);
     }
 
     disconnectedCallback() {
+        this.removeEventListener("focus", this._handleFocus);
+        this.removeEventListener("blur", this._handleBlur);
         this.removeEventListener("click", this._handleClick);
         this.removeEventListener("keydown", this._handleKeydown);
     }
+
+    _handleFocus = (e) => {
+        this.shadowRoot.querySelector("div").focus();
+    };
+
+    _handleBlur = (e) => {
+        const optionsContainer = getOptionsContainer(this);
+        if (optionsContainer.isVisible) {
+            optionsContainer.hide();
+            this.focus();
+        }
+    };
 
     _handleClick = (e) => {
         if (e.target.tagName === "SELECT-BOX-OPTION") {
             this.selectValue(e.target.value);
         }
 
-        optionsContainer(this).toggleVisibility();
+        getOptionsContainer(this).toggleVisibility();
     };
 
     _handleKeydown = (e) => {
         switch (e.code) {
             case "Space":
-                optionsContainer(this).toggleVisibility();
+                getOptionsContainer(this).toggleVisibility();
                 break;
             case "ArrowUp":
                 const previousOption = this.options[
@@ -150,16 +170,18 @@ export class SelectBox extends HTMLElement {
                 break;
             case "Enter":
             case "Escape":
-                optionsContainer(this).hide();
+                getOptionsContainer(this).hide();
                 break;
             default:
                 clearTimeout(this._debounceTimeout);
                 this._searchTerm += e.key;
-                this._timeoutHandle = setTimeout(() => {
+                this._debounceTimeout = setTimeout(() => {
                     this._searchTerm = "";
                 }, 500);
-                
-                const searchedOption = this.options.find(o => o.value.toLowerCase().startsWith(this._searchTerm));
+
+                const searchedOption = this.options.find((o) =>
+                    o.value.toLowerCase().startsWith(this._searchTerm)
+                );
                 if (searchedOption) {
                     this.selectValue(searchedOption.value);
                 }
@@ -167,14 +189,107 @@ export class SelectBox extends HTMLElement {
     };
 }
 
-function optionsContainer(selectBox) {
-    const ul = selectBox.shadowRoot.querySelector("ul");
+class DebounceSearch {
+    constructor() {
+        this._searchTerm = "";
+        this._timeout = null;
+    }
+
+    get searchTerm() {
+        return this._searchTerm;
+    }
+
+    append(text) {
+        clearTimeout(this._timeout);
+        this._searchTerm += text;
+        this._timeout = setTimeout(() => {
+            this._searchTerm = "";
+        }, 500);
+    }
+}
+
+class KeydownHandler {
+    constructor(selectBox, event) {
+        this._selectBox = selectBox;
+        this._event = event;
+    }
+
+    get event() {
+        this._event;
+    }
+
+    get selectBox() {
+        return this._selectBox;
+    }
+
+    handle() {
+        throw new Error("Not implemented");
+    }
+}
+
+class SpaceHandler extends KeydownHandler {
+    handle() {
+        getOptionsContainer(this.selectBox).toggleVisibility();
+    }
+}
+
+class ArrowUpHandler extends KeydownHandler {
+    handle() {
+        const previousOption = this.selectBox.options[
+            this.selectBox.selectedOptionIndex - 1
+        ];
+        if (previousOption) {
+            this.selectBox.selectValue(previousOption.value);
+        }
+    }
+}
+
+class ArrowDownHandler extends KeydownHandler {
+    handle() {
+        const nextOption = this.selectBox.options[
+            this.selectBox.selectedOptionIndex + 1
+        ];
+        if (nextOption) {
+            this.selectBox.selectValue(nextOption.value);
+        }
+    }
+}
+
+class EnterHandler extends KeydownHandler {
+    handle() {
+        getOptionsContainer(this.selectBox).hide();
+    }
+}
+
+class DefaultHandler extends KeydownHandler {
+    constructor(selectBox, event, debounceSearch) {
+        super(selectBox, event);
+        this._debounceSearch = debounceSearch;
+    }
+
+    handle() {
+        this._debounceSearch.append(this.event.key);
+        const searchedOption = this.options.find((o) =>
+            o.value.toLowerCase().startsWith(this._debounceSearch.searchTerm)
+        );
+
+        if (searchedOption) {
+            this.selectValue(searchedOption.value);
+        }
+    }
+}
+
+function getOptionsContainer(selectBox) {
+    const div = selectBox.shadowRoot.querySelector("div");
     return {
+        get isVisible() {
+            return div.classList.contains("open");
+        },
         toggleVisibility() {
-            ul.classList.toggle("show");
+            div.classList.toggle("open");
         },
         hide() {
-            ul.classList.remove("show");
+            div.classList.remove("open");
         },
     };
 }
@@ -187,6 +302,9 @@ async function whenSelectBoxOptionsDefined(selectBox) {
 }
 
 function initialize(selectBox) {
+    // Make select-box focusable
+    selectBox.tabIndex = 0;
+
     const selectedOption = selectBox.selectedOption || selectBox.options[0];
     if (!selectedOption) {
         return;
