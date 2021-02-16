@@ -78,10 +78,7 @@ export class SelectBox extends HTMLElement {
         // properties of select box option elements are undefined.
         whenSelectBoxOptionsDefined(this).then(initialize);
 
-        console.log(this.getAttribute("tabindex"));
-
-        this._searchTerm = "";
-        this._debounceTimeout = null;
+        this._debounceSearch = new DebounceSearch();
     }
 
     get options() {
@@ -148,45 +145,26 @@ export class SelectBox extends HTMLElement {
     };
 
     _handleKeydown = (e) => {
-        switch (e.code) {
-            case "Space":
-                getOptionsContainer(this).toggleVisibility();
-                break;
-            case "ArrowUp":
-                const previousOption = this.options[
-                    this.selectedOptionIndex - 1
-                ];
-                if (previousOption) {
-                    this.selectValue(previousOption.value);
-                }
-
-                break;
-            case "ArrowDown":
-                const nextOption = this.options[this.selectedOptionIndex + 1];
-                if (nextOption) {
-                    this.selectValue(nextOption.value);
-                }
-
-                break;
-            case "Enter":
-            case "Escape":
-                getOptionsContainer(this).hide();
-                break;
-            default:
-                clearTimeout(this._debounceTimeout);
-                this._searchTerm += e.key;
-                this._debounceTimeout = setTimeout(() => {
-                    this._searchTerm = "";
-                }, 500);
-
-                const searchedOption = this.options.find((o) =>
-                    o.value.toLowerCase().startsWith(this._searchTerm)
-                );
-                if (searchedOption) {
-                    this.selectValue(searchedOption.value);
-                }
-        }
+        const handler = createKeydownHandler(this, e, this._debounceSearch);
+        handler.handle();
     };
+}
+
+function createKeydownHandler(selectBox, event, debounceSearch) {
+    const { code, key } = event;
+    switch (code) {
+        case "Space":
+            return new SpaceHandler(selectBox, key, debounceSearch);
+        case "ArrowUp":
+            return new ArrowUpHandler(selectBox, key, debounceSearch);
+        case "ArrowDown":
+            return new ArrowDownHandler(selectBox, key, debounceSearch);
+        case "Enter":
+        case "Escape":
+            return new EnterHandler(selectBox, key, debounceSearch);
+        default:
+            return new DefaultHandler(selectBox, key, debounceSearch);
+    }
 }
 
 class DebounceSearch {
@@ -195,27 +173,31 @@ class DebounceSearch {
         this._timeout = null;
     }
 
-    get searchTerm() {
-        return this._searchTerm;
+    appendToSearchTerm(text) {
+        this._searchTerm += String(text).toLowerCase();
     }
 
-    append(text) {
+    search(options) {
         clearTimeout(this._timeout);
-        this._searchTerm += text;
         this._timeout = setTimeout(() => {
             this._searchTerm = "";
         }, 500);
+
+        return options.find((o) =>
+            o.innerText.toLowerCase().startsWith(this._searchTerm)
+        );
     }
 }
 
 class KeydownHandler {
-    constructor(selectBox, event) {
+    constructor(selectBox, key, debounceSearch) {
         this._selectBox = selectBox;
-        this._event = event;
+        this._key = key;
+        this._debounceSearch = debounceSearch;
     }
 
-    get event() {
-        this._event;
+    get key() {
+        return this._key;
     }
 
     get selectBox() {
@@ -262,19 +244,14 @@ class EnterHandler extends KeydownHandler {
 }
 
 class DefaultHandler extends KeydownHandler {
-    constructor(selectBox, event, debounceSearch) {
-        super(selectBox, event);
-        this._debounceSearch = debounceSearch;
-    }
-
     handle() {
-        this._debounceSearch.append(this.event.key);
-        const searchedOption = this.options.find((o) =>
-            o.value.toLowerCase().startsWith(this._debounceSearch.searchTerm)
+        this._debounceSearch.appendToSearchTerm(this.key);
+        const searchedOption = this._debounceSearch.search(
+            this.selectBox.options
         );
 
         if (searchedOption) {
-            this.selectValue(searchedOption.value);
+            this.selectBox.selectValue(searchedOption.value);
         }
     }
 }
@@ -302,7 +279,6 @@ async function whenSelectBoxOptionsDefined(selectBox) {
 }
 
 function initialize(selectBox) {
-    // Make select-box focusable
     selectBox.tabIndex = 0;
 
     const selectedOption = selectBox.selectedOption || selectBox.options[0];
