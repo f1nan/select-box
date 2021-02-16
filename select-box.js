@@ -110,29 +110,21 @@ export class SelectBox extends HTMLElement {
     }
 
     connectedCallback() {
-        // The selection of on option has to occur before the blur of the select box. The
-        // mousedown event fires before the blur event. That is why it is used over click here.
-        this.addEventListener("mousedown", this._handleMousedown);
-        this.addEventListener("blur", this._handleBlur);
+        this.addEventListener("click", this._handleClick);
         this.addEventListener("keydown", this._handleKeydown);
     }
 
     disconnectedCallback() {
-        this.removeEventListener("mousedown", this._handleMousedown);
-        this.removeEventListener("blur", this._handleBlur);
+        this.removeEventListener("click", this._handleClick);
         this.removeEventListener("keydown", this._handleKeydown);
     }
 
-    _handleMousedown = (e) => {
+    _handleClick = (e) => {
         if (e.target.tagName === "SELECT-BOX-OPTION") {
             this.selectValue(e.target.value);
         }
 
         optionsContainer(this).toggleVisibility();
-    };
-
-    _handleBlur = (e) => {
-        optionsContainer(this).hide();
     };
 
     _handleKeydown = (e) => {
